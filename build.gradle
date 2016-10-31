@@ -1,0 +1,103 @@
+import groovy.xml.XmlUtil
+
+apply plugin: 'java'
+apply plugin: 'application'
+apply plugin: 'checkstyle'
+apply plugin: 'pmd'
+apply plugin: 'findbugs'
+
+repositories {
+    mavenCentral()
+    flatDir {
+        dirs 'libs'
+    }
+}
+
+dependencies {
+    compile name: 'karel'
+}
+
+run {
+    if (project.hasProperty("karel")) {
+        args 'code=' + project.findProperty("karel")
+    } else {
+        throw new GradleException('Error: Did not specify Karel to use!  Use the property \'karel\'.')
+    }
+
+    if (project.hasProperty("appArgs")) {
+        args Eval.me(appArgs)
+    }
+}
+
+test {
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
+}
+
+checkstyle {
+    configFile = new File(rootDir, "checkstyle.xml")
+    toolVersion = '6.19'
+    if (project.hasProperty("ignoreCheckstyle")) {
+        ignoreFailures = true
+    }
+}
+
+pmd {
+    consoleOutput = true
+    sourceSets = [sourceSets.main, sourceSets.test]
+    reportsDir = file("$project.buildDir/reports/pmd")
+    ruleSetFiles = files(new File(rootDir, "pmd-ruleset.xml"))
+    ruleSets = []
+}
+
+findbugs {
+    sourceSets = [sourceSets.main, sourceSets.test]
+    excludeFilter = new File(rootDir, "findBugsSuppressions.xml")
+    effort = "max"
+}
+
+ext.printReportSafe = { xmlReport ->
+    if (xmlReport.exists()) {
+        def bugs = (new XmlParser().parse(xmlReport)).BugInstance
+        bugs.each { System.out.println(new XmlUtil().serialize(it)) }
+    }
+}
+
+task findbugsMainReport << {
+    printReportSafe(findbugsMain.reports.getXml().destination)
+}
+
+task findbugsTestReport << {
+    printReportSafe(findbugsTest.reports.getXml().destination)
+}
+
+findbugsMain.finalizedBy findbugsMainReport
+findbugsTest.finalizedBy findbugsTestReport
+
+mainClassName = "stanford.karel.Karel"
+
+// Java 6 is REQUIRED for Karel to operate
+sourceCompatibility = 1.6
+assert hasProperty('java6Home') : "Set the property 'java6Home' in your your gradle.properties pointing to a Java 6 installation"
+def javaExecutablesPath = new File(java6Home, 'bin')
+def javaExecutables = [:].withDefault { execName ->
+    def executable = new File(javaExecutablesPath, execName)
+    assert executable.exists() : "There is no ${execName} executable in ${javaExecutablesPath}"
+    executable
+}
+tasks.withType(AbstractCompile) {
+    options.with {
+        fork = true
+        forkOptions.executable = javaExecutables.javac
+    }
+}
+tasks.withType(Javadoc) {
+    executable = javaExecutables.javadoc
+}
+tasks.withType(Test) {
+    executable = javaExecutables.java
+}
+tasks.withType(JavaExec) {
+    executable = javaExecutables.java
+}
